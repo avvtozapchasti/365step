@@ -6,8 +6,6 @@
 personalised twelve-month roadmap, and every day the product answers one question:
 **what should I do today?** Usually the answer is ten to twenty minutes long.
 
-Built for VentureHack EduTech.
-
 ```bash
 npm install
 npm run db:seed
