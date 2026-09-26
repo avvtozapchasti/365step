@@ -1,14 +1,10 @@
 "use server";
 
-import { randomUUID } from "node:crypto";
 import { redirect } from "next/navigation";
 
 import { requireUser } from "@/lib/auth";
-import { one, run, transaction } from "@/lib/db";
-import { addDays, nowIso, todayIso } from "@/lib/date";
-import { checkAchievements } from "@/lib/gamification";
-import { generateRoadmap } from "@/lib/roadmap";
-import { ensureTodaySteps } from "@/lib/steps";
+import { todayIso } from "@/lib/date";
+import { applyOnboarding } from "@/lib/onboarding";
 import { GOALS, ROLES, SUBJECTS } from "@/lib/taxonomy";
 import type { Role, SkillLevel } from "@/lib/types";
 
@@ -78,73 +74,16 @@ export async function completeOnboardingAction(
     if (!/^\d{4}-\d{2}-\d{2}$/.test(targetDate) || targetDate <= startDate) targetDate = null;
   }
 
-  const secondary = answers.secondary.slice(0, 8);
-
-  // ---- persist -----------------------------------------------------------
-  const goalId = randomUUID();
-
-  await transaction(async () => {
-    const existingProfile = await one<{ user_id: string }>(
-      "SELECT user_id FROM profiles WHERE user_id = ?",
-      [user.id],
-    );
-
-    const profileValues = [
-      answers.role,
-      answers.grade,
-      answers.country ?? null,
-      answers.dailyMinutes,
-      answers.skillLevel,
-      JSON.stringify(interests),
-      JSON.stringify(secondary),
-      nowIso(),
-    ];
-
-    if (existingProfile) {
-      await run(
-        `UPDATE profiles SET role = ?, grade = ?, country = ?, daily_minutes = ?,
-             skill_level = ?, interests = ?, secondary = ?, onboarded_at = ?
-           WHERE user_id = ?`,
-        [...profileValues, user.id],
-      );
-    } else {
-      await run(
-        `INSERT INTO profiles (role, grade, country, daily_minutes, skill_level,
-             interests, secondary, onboarded_at, user_id, timezone)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'UTC')`,
-        [...profileValues, user.id],
-      );
-    }
-
-    // Re-running onboarding replaces the previous plan rather than stacking a
-    // second active goal on top of it.
-    await run("UPDATE goals SET status = 'archived', is_primary = 0 WHERE user_id = ?", [user.id]);
-
-    await run(
-      `INSERT INTO goals (id, user_id, slug, title, category, start_date, target_date,
-           status, is_primary, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'active', 1, ?)`,
-      [
-        goalId,
-        user.id,
-        goal.slug,
-        goal.headline,
-        goal.category,
-        startDate,
-        targetDate ?? addDays(startDate, 364),
-        nowIso(),
-      ],
-    );
-
-    await run("DELETE FROM daily_steps WHERE user_id = ? AND step_date = ?", [user.id, startDate]);
+  await applyOnboarding(user.id, goal, {
+    role: answers.role,
+    grade: answers.grade,
+    country: answers.country ?? null,
+    dailyMinutes: answers.dailyMinutes,
+    skillLevel: answers.skillLevel,
+    interests,
+    secondary: answers.secondary.slice(0, 8),
+    targetDate,
   });
-
-  // The roadmap writes many rows of its own; keeping it outside the transaction
-  // above avoids holding a write lock across the whole generation.
-  await generateRoadmap(user.id, goalId, goal.headline, interests);
-
-  await ensureTodaySteps(user.id);
-  await checkAchievements(user.id);
 
   redirect("/dashboard?welcome=1");
 }

@@ -91,8 +91,8 @@ export default async function LandingPage() {
             </div>
 
             <p className="subtle mt-4 text-xs">
-              The demo opens a seeded account on day 37 of its journey — a real dashboard,
-              not a screenshot.
+              Pick a scenario — school student, university student or young professional —
+              and open a real dashboard, not a screenshot.
             </p>
           </div>
 

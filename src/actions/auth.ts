@@ -6,18 +6,16 @@ import {
   authenticate,
   createSession,
   destroySession,
-  findUserByEmail,
   hasOnboarded,
   pruneSessions,
   registerUser,
   validateCredentials,
 } from "@/lib/auth";
+import { ensureDemoUser, type DemoPersona } from "@/lib/demo";
 
 export interface FormState {
   error?: string;
 }
-
-const DEMO_EMAIL = "alex@365step.app";
 
 export async function signUpAction(
   _prev: FormState,
@@ -30,33 +28,13 @@ export async function signUpAction(
   const invalid = validateCredentials(email, password, name);
   if (invalid) return { error: invalid };
 
-  try {
-    const result = await registerUser(email, password, name);
-    if (!result.ok || !result.userId) return { error: result.error ?? "Could not create account." };
+  const result = await registerUser(email, password, name);
+  if (!result.ok || !result.userId) return { error: result.error ?? "Could not create account." };
 
-    try {
-      await createSession(result.userId);
-    } catch (error) {
-      console.error("Failed to create session:", error);
-      return { error: "Could not create session. Please try again." };
-    }
+  await createSession(result.userId);
 
-    // `redirect` signals by throwing, so it must sit outside any try/catch.
-    redirect("/onboarding");
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error("Sign up error:", msg, error);
-
-    // Check if it's a database connection error
-    if (msg.includes("ECONNREFUSED") || msg.includes("connection") || msg.includes("database")) {
-      return { error: "Database connection failed. Please check the server configuration." };
-    }
-    if (msg.includes("table") || msg.includes("column")) {
-      return { error: "Database schema error. Please ensure the database is properly initialized." };
-    }
-
-    return { error: "An unexpected error occurred. Please try again later." };
-  }
+  // `redirect` signals by throwing, so it must sit outside any try/catch.
+  redirect("/onboarding");
 }
 
 export async function signInAction(
@@ -68,69 +46,27 @@ export async function signInAction(
 
   if (!email || !password) return { error: "Enter your email and password." };
 
-  try {
-    const result = await authenticate(email, password);
-    if (!result.ok || !result.userId) return { error: result.error ?? "Could not sign in." };
+  const result = await authenticate(email, password);
+  if (!result.ok || !result.userId) return { error: result.error ?? "Could not sign in." };
 
-    try {
-      await pruneSessions();
-      await createSession(result.userId);
-    } catch (error) {
-      console.error("Failed to create session:", error);
-      return { error: "Could not create session. Please try again." };
-    }
+  await pruneSessions();
+  await createSession(result.userId);
 
-    const onboarded = await hasOnboarded(result.userId);
-    redirect(onboarded ? "/dashboard" : "/onboarding");
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error("Sign in error:", msg, error);
-
-    // Check if it's a database connection error
-    if (msg.includes("ECONNREFUSED") || msg.includes("connection") || msg.includes("database")) {
-      return { error: "Database connection failed. Please check the server configuration." };
-    }
-    if (msg.includes("table") || msg.includes("column")) {
-      return { error: "Database schema error. Please ensure the database is properly initialized." };
-    }
-
-    return { error: "An unexpected error occurred. Please try again later." };
-  }
+  redirect((await hasOnboarded(result.userId)) ? "/dashboard" : "/onboarding");
 }
 
 /**
- * Signs into the seeded demo account.
+ * Signs into one of the demo accounts: school, university or graduate.
  *
  * Present so a first-time visitor — or a judge with two minutes — can see a
  * populated product immediately instead of an empty new account.
  */
-export async function demoLoginAction(): Promise<FormState> {
-  try {
-    const user = await findUserByEmail(DEMO_EMAIL);
-    if (!user) {
-      return {
-        error: "The demo account is not seeded yet. Run `npm run db:seed` and try again.",
-      };
-    }
+export async function demoLoginAction(persona: DemoPersona = "school"): Promise<FormState> {
+  const userId = await ensureDemoUser(persona);
+  if (!userId) return { error: "Unknown demo scenario." };
 
-    try {
-      await createSession(user.id);
-    } catch (error) {
-      console.error("Failed to create session:", error);
-      return { error: "Could not create session. Please try again." };
-    }
-
-    redirect("/dashboard");
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error("Demo login error:", msg, error);
-
-    if (msg.includes("table") || msg.includes("column")) {
-      return { error: "Database schema error. Please ensure the database is properly initialized." };
-    }
-
-    return { error: "Could not sign in. Please try again." };
-  }
+  await createSession(userId);
+  redirect("/dashboard");
 }
 
 export async function signOutAction(): Promise<void> {

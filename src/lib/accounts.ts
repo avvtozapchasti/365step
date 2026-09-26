@@ -43,77 +43,38 @@ export async function registerUser(
   const invalid = validateCredentials(email, password, name);
   if (invalid) return { ok: false, error: invalid };
 
-  try {
-    const normalised = email.trim().toLowerCase();
+  const normalised = email.trim().toLowerCase();
 
-    const existing = await one<{ id: string }>("SELECT id FROM users WHERE email = ?", [
-      normalised,
-    ]);
-    if (existing) return { ok: false, error: "That email is already registered. Sign in instead." };
+  const existing = await one<{ id: string }>("SELECT id FROM users WHERE email = ?", [normalised]);
+  if (existing) return { ok: false, error: "That email is already registered. Sign in instead." };
 
-    const id = randomUUID();
-    await run(
-      "INSERT INTO users (id, email, password_hash, name, created_at) VALUES (?, ?, ?, ?, ?)",
-      [id, normalised, await hashPassword(password), name.trim(), nowIso()],
-    );
+  const id = randomUUID();
+  await run(
+    "INSERT INTO users (id, email, password_hash, name, created_at) VALUES (?, ?, ?, ?, ?)",
+    [id, normalised, await hashPassword(password), name.trim(), nowIso()],
+  );
 
-    return { ok: true, userId: id };
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error("Register user error:", msg, error);
-
-    if (msg.includes("UNIQUE constraint failed") || msg.includes("duplicate key")) {
-      return { ok: false, error: "That email is already registered. Sign in instead." };
-    }
-    if (msg.includes("table") || msg.includes("column")) {
-      return {
-        ok: false,
-        error: "Database schema error. Please ensure the database is properly initialized.",
-      };
-    }
-
-    return { ok: false, error: "Could not create account. Please try again." };
-  }
+  return { ok: true, userId: id };
 }
 
 export async function authenticate(email: string, password: string): Promise<AuthResult> {
-  try {
-    const normalised = email.trim().toLowerCase();
+  const normalised = email.trim().toLowerCase();
 
-    const row = await one<{ id: string; password_hash: string }>(
-      "SELECT id, password_hash FROM users WHERE email = ?",
-      [normalised],
-    );
-    if (!row) return { ok: false, error: "No account found for that email." };
+  const row = await one<{ id: string; password_hash: string }>(
+    "SELECT id, password_hash FROM users WHERE email = ?",
+    [normalised],
+  );
+  if (!row) return { ok: false, error: "No account found for that email." };
 
-    if (!(await verifyPassword(password, String(row.password_hash)))) {
-      return { ok: false, error: "That password does not match." };
-    }
-    return { ok: true, userId: String(row.id) };
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error("Authenticate error:", msg, error);
-
-    if (msg.includes("table") || msg.includes("column")) {
-      return {
-        ok: false,
-        error: "Database schema error. Please ensure the database is properly initialized.",
-      };
-    }
-
-    return { ok: false, error: "Could not sign in. Please try again." };
+  if (!(await verifyPassword(password, String(row.password_hash)))) {
+    return { ok: false, error: "That password does not match." };
   }
+  return { ok: true, userId: String(row.id) };
 }
 
 /** Used by the demo entry point to find the seeded account. */
 export async function findUserByEmail(email: string): Promise<{ id: string } | null> {
-  try {
-    return one<{ id: string }>("SELECT id FROM users WHERE email = ?", [email.trim().toLowerCase()]);
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error("Find user by email error:", msg, error);
-    return null;
-  }
+  return one<{ id: string }>("SELECT id FROM users WHERE email = ?", [email.trim().toLowerCase()]);
 }
 
 export async function hasOnboarded(userId: string): Promise<boolean> {

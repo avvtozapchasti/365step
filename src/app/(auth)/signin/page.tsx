@@ -34,12 +34,11 @@ export default async function SignInPage() {
       <div className="surface mt-5 p-4">
         <p className="eyebrow mb-2">Demo account</p>
         <p className="muted text-xs leading-relaxed">
-          <span className="font-mono">alex@365step.app</span> ·{" "}
-          <span className="font-mono">demo1234</span> — seeded on day 37 with a 12 day
-          streak, 14 completed lessons and four saved opportunities.
+          Three ready-made scenarios — a school student, a university student and a
+          young professional — each with their own roadmap and today&apos;s plan.
         </p>
         <div className="mt-3">
-          <DemoLoginButton size="sm">Sign in as Alex</DemoLoginButton>
+          <DemoLoginButton size="sm">Open a demo account</DemoLoginButton>
         </div>
       </div>
     </>
