@@ -158,6 +158,12 @@
   }
 }
 
+/*
+ * Dark mode follows the system by default. These `data-theme` hooks let a future
+ * toggle override it in either direction by setting the attribute on <html>;
+ * nothing sets it today, which is why the media query above is guarded by
+ * `:not([data-theme="light"])` rather than standing alone.
+ */
 :root[data-theme="dark"] {
   --bg: #0b0a0a;
   --bg-raised: #151414;
