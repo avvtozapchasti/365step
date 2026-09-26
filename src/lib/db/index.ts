@@ -63,9 +63,12 @@ async function createSqliteDriver(): Promise<Driver> {
   const file =
     process.env.SQLITE_PATH ??
     (isServerless ? "/tmp/365step.db" : path.join(process.cwd(), "data", "365step.db"));
+
+  console.log(`[DB] SQLite: isServerless=${isServerless}, file=${file}`);
   fs.mkdirSync(path.dirname(file), { recursive: true });
 
   const db = new Database(file);
+  console.log(`[DB] SQLite database opened`);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
 
@@ -83,25 +86,30 @@ async function createSqliteDriver(): Promise<Driver> {
   // building, so calling them here would await a promise that cannot resolve
   // until this function returns.
   if (isServerless) {
-    const hasSchema = db
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'users'")
-      .get();
-    if (!hasSchema) {
-      try {
-        db.exec(fs.readFileSync(path.join(process.cwd(), "db", "schema.sql"), "utf8"));
-        const { seedRawSqlite } = await import("../../../db/seed-runtime");
-        await seedRawSqlite(db);
-        console.log(
-          "365step: provisioned a temporary SQLite database in /tmp. This resets " +
-            "on the next cold start — set DATABASE_URL to a Postgres/Supabase " +
-            "connection string for real persistence (see README, Deployment).",
-        );
-      } catch (error) {
-        // Surface in the server log. Queries against missing tables will still
-        // fail afterwards with a clear "no such table" the error boundary
-        // recognises, rather than this silently pretending to have succeeded.
-        console.error("365step: automatic database setup failed —", error);
+    try {
+      const hasSchema = db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'users'")
+        .get();
+      if (!hasSchema) {
+        try {
+          console.log("[DB] Applying schema...");
+          db.exec(fs.readFileSync(path.join(process.cwd(), "db", "schema.sql"), "utf8"));
+          console.log("[DB] Schema applied, seeding demo data...");
+          const { seedRawSqlite } = await import("../../../db/seed-runtime");
+          await seedRawSqlite(db);
+          console.log(
+            "365step: provisioned a temporary SQLite database in /tmp. This resets " +
+              "on the next cold start — set DATABASE_URL to a Postgres/Supabase " +
+              "connection string for real persistence (see README, Deployment).",
+          );
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          console.error("365step: automatic database setup failed —", msg, error);
+        }
       }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error("365step: database query failed —", msg, error);
     }
   }
 
@@ -152,52 +160,61 @@ async function createPostgresDriver(url: string): Promise<Driver> {
   const { default: postgres } = await import("postgres");
 
   const local = url.includes("localhost") || url.includes("127.0.0.1");
-  const pool = postgres(url, {
-    max: 5,
-    idle_timeout: 20,
-    // Supabase requires TLS; a local Postgres over loopback does not have it.
-    ssl: local ? false : "require",
-  }) as unknown as PgPool;
+  console.log(`[DB] PostgreSQL: local=${local}, connecting...`);
 
-  const wrap = (conn: PgConnection): Executor => ({
-    async all(sql, params) {
-      return (await conn.unsafe(toPgPlaceholders(sql), params)) as Row[];
-    },
-    async run(sql, params) {
-      await conn.unsafe(toPgPlaceholders(sql), params);
-    },
-  });
+  try {
+    const pool = postgres(url, {
+      max: 5,
+      idle_timeout: 20,
+      // Supabase requires TLS; a local Postgres over loopback does not have it.
+      ssl: local ? false : "require",
+    }) as unknown as PgPool;
 
-  const poolExecutor = wrap(pool);
+    console.log(`[DB] PostgreSQL pool created`);
 
-  return {
-    dialect: "postgres",
-    all: (sql, params) => poolExecutor.all(sql, params),
-    run: (sql, params) => poolExecutor.run(sql, params),
-    async transaction(fn) {
-      if (txContext.getStore()) return fn(); // already inside one
-      // Hold one pooled connection for the whole block, so BEGIN/COMMIT and the
-      // writes between them cannot land on different connections.
-      const held = await pool.reserve();
-      try {
-        await held.unsafe("BEGIN");
+    const poolExecutor = wrap(pool);
+
+    return {
+      dialect: "postgres",
+      all: (sql, params) => poolExecutor.all(sql, params),
+      run: (sql, params) => poolExecutor.run(sql, params),
+      async transaction(fn) {
+        if (txContext.getStore()) return fn();
+        const held = await pool.reserve();
         try {
-          const result = await txContext.run(wrap(held), fn);
-          await held.unsafe("COMMIT");
-          return result;
-        } catch (error) {
-          await held.unsafe("ROLLBACK");
-          throw error;
+          await held.unsafe("BEGIN");
+          try {
+            const result = await txContext.run(wrap(held), fn);
+            await held.unsafe("COMMIT");
+            return result;
+          } catch (error) {
+            await held.unsafe("ROLLBACK");
+            throw error;
+          }
+        } finally {
+          held.release();
         }
-      } finally {
-        held.release();
-      }
-    },
-    async exec(sql) {
-      await pool.unsafe(sql);
-    },
-  };
+      },
+      async exec(sql) {
+        await pool.unsafe(sql);
+      },
+    };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error(`[DB] PostgreSQL connection failed: ${msg}`);
+    throw error;
+  }
 }
+
+// Helper for PostgreSQL pool operations
+const wrap = (conn: PgConnection): Executor => ({
+  async all(sql, params) {
+    return (await conn.unsafe(toPgPlaceholders(sql), params)) as Row[];
+  },
+  async run(sql, params) {
+    await conn.unsafe(toPgPlaceholders(sql), params);
+  },
+});
 
 // -------------------------------------------------------------- singleton ---
 
@@ -206,6 +223,7 @@ const globalForDb = globalThis as unknown as { __step365Driver?: Promise<Driver>
 function driver(): Promise<Driver> {
   if (!globalForDb.__step365Driver) {
     const url = process.env.DATABASE_URL ?? process.env.POSTGRES_URL;
+    console.log(`[DB] Initializing ${url ? "PostgreSQL" : "SQLite"} driver`);
     globalForDb.__step365Driver = url ? createPostgresDriver(url) : createSqliteDriver();
   }
   return globalForDb.__step365Driver;
