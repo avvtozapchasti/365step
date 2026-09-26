@@ -33,7 +33,12 @@ export async function signUpAction(
   const result = await registerUser(email, password, name);
   if (!result.ok || !result.userId) return { error: result.error ?? "Could not create account." };
 
-  await createSession(result.userId);
+  try {
+    await createSession(result.userId);
+  } catch (error) {
+    console.error("Failed to create session:", error);
+    return { error: "Could not create session. Please try again." };
+  }
 
   // `redirect` signals by throwing, so it must sit outside any try/catch.
   redirect("/onboarding");
@@ -51,8 +56,13 @@ export async function signInAction(
   const result = await authenticate(email, password);
   if (!result.ok || !result.userId) return { error: result.error ?? "Could not sign in." };
 
-  await pruneSessions();
-  await createSession(result.userId);
+  try {
+    await pruneSessions();
+    await createSession(result.userId);
+  } catch (error) {
+    console.error("Failed to create session:", error);
+    return { error: "Could not create session. Please try again." };
+  }
 
   redirect((await hasOnboarded(result.userId)) ? "/dashboard" : "/onboarding");
 }
