@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
-import { ArrowRight, BookOpen, Compass, Flame, Map, Sparkles, Zap } from "lucide-react";
+import { ArrowRight, BookOpen, Compass, Flame, Map, Sparkles, Swords, Zap } from "lucide-react";
 
 import { AiPanel } from "@/components/ai-panel";
 import { DeadlineList } from "@/components/deadline-list";
@@ -21,6 +21,7 @@ import {
 import { analyseGrowth } from "@/lib/ai";
 import { currentUser } from "@/lib/auth";
 import { greeting } from "@/lib/date";
+import { hasAttemptedTodayChallenge } from "@/lib/daily-challenge";
 import {
   getDeadlines,
   getPrimaryGoal,
@@ -46,10 +47,11 @@ export default async function DashboardPage({
 
   // Building today's plan on first visit of the day is what makes the product
   // feel like it was waiting for you.
-  const [steps, snapshot, deadlines] = await Promise.all([
+  const [steps, snapshot, deadlines, dailyChallengeDone] = await Promise.all([
     ensureTodaySteps(user.id),
     getSnapshot(user.id, goal),
     getDeadlines(user.id),
+    hasAttemptedTodayChallenge(user.id),
   ]);
 
   const level = levelFor(snapshot.totalXp);
@@ -113,6 +115,11 @@ export default async function DashboardPage({
         {/* ================================================= today's steps */}
         <section>
           <TodaySteps steps={steps} />
+        </section>
+
+        {/* ==================================================== compete card */}
+        <section>
+          <DailyChallengeCard done={dailyChallengeDone} />
         </section>
 
         {/* =========================================== assistant + deadlines */}
@@ -209,6 +216,37 @@ async function AssistantSlot({ userId, name }: { userId: string; name: string })
   const analysis = await analyseGrowth(userId, name);
   if (!analysis) return null;
   return <AiPanel analysis={analysis} />;
+}
+
+function DailyChallengeCard({ done }: { done: boolean }) {
+  return (
+    <Link href="/compete?tab=daily" className="block">
+      <Panel className="group flex items-center gap-4 p-4 transition-all hover:shadow-lift sm:p-5">
+        <span
+          className="flex size-10 shrink-0 items-center justify-center rounded-full"
+          style={{
+            background: done
+              ? "color-mix(in oklab, var(--color-done) 13%, transparent)"
+              : "color-mix(in oklab, var(--color-kind-opportunity) 14%, transparent)",
+            color: done ? "var(--color-done)" : "var(--color-kind-opportunity)",
+          }}
+        >
+          {done ? <Swords className="size-[18px]" /> : <Zap className="size-[18px]" />}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold">
+            {done ? "Today's SAT Challenge — done" : "Today's SAT Challenge"}
+          </p>
+          <p className="muted text-xs">
+            {done
+              ? "See the leaderboard, or head to Battles to challenge a friend."
+              : "Five mixed SAT questions, one attempt, a leaderboard for today."}
+          </p>
+        </div>
+        <ArrowRight className="subtle size-4 shrink-0 transition-transform group-hover:translate-x-0.5" />
+      </Panel>
+    </Link>
+  );
 }
 
 function WelcomeNote() {

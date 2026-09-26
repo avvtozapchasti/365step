@@ -18,6 +18,11 @@ export const XP_AWARDS = {
   projectShipped: 60,
   reflect: 5,
   dailyPlanComplete: 20, // bonus for clearing every step of the day
+  friendAdded: 15,
+  battleParticipation: 10,
+  battleWin: 35,
+  dailyChallengeComplete: 20,
+  dailyChallengePerfect: 10, // bonus on top of dailyChallengeComplete
 } as const;
 
 /**

@@ -96,6 +96,18 @@ export interface SeedAchievement {
   description: string;
   icon: string;
   xp: number;
-  metric: "steps" | "streak" | "lessons" | "saved" | "projects" | "applications" | "xp" | "research";
+  metric:
+    | "steps"
+    | "streak"
+    | "lessons"
+    | "saved"
+    | "projects"
+    | "applications"
+    | "xp"
+    | "research"
+    | "friends"
+    | "battles_played"
+    | "battles_won"
+    | "daily_challenges";
   threshold: number;
 }

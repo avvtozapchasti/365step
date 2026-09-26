@@ -135,7 +135,20 @@ export async function recordDailyProgress(userId: string, date = todayIso()): Pr
 
 /** Current value of every metric achievements can be measured against. */
 async function metricValues(userId: string): Promise<Record<string, number>> {
-  const [steps, streak, lessons, saved, projects, applications, xp, research] = await Promise.all([
+  const [
+    steps,
+    streak,
+    lessons,
+    saved,
+    projects,
+    applications,
+    xp,
+    research,
+    friends,
+    battlesPlayed,
+    battlesWon,
+    dailyChallenges,
+  ] = await Promise.all([
     scalar("SELECT COUNT(*) FROM daily_steps WHERE user_id = ? AND status = 'done'", [userId]),
     scalar("SELECT COALESCE(MAX(current_days), 0) FROM streaks WHERE user_id = ?", [userId]),
     scalar("SELECT COUNT(*) FROM lesson_progress WHERE user_id = ? AND status = 'completed'", [
@@ -152,9 +165,29 @@ async function metricValues(userId: string): Promise<Record<string, number>> {
         WHERE lp.user_id = ? AND lp.status = 'completed' AND c.track = 'Research'`,
       [userId],
     ),
+    scalar(
+      "SELECT COUNT(*) FROM friendships WHERE (user_a = ? OR user_b = ?) AND status = 'accepted'",
+      [userId, userId],
+    ),
+    scalar("SELECT COUNT(*) FROM battle_results WHERE user_id = ?", [userId]),
+    scalar("SELECT COUNT(*) FROM battles WHERE winner_id = ?", [userId]),
+    scalar("SELECT COUNT(*) FROM daily_challenge_attempts WHERE user_id = ?", [userId]),
   ]);
 
-  return { steps, streak, lessons, saved, projects, applications, xp, research };
+  return {
+    steps,
+    streak,
+    lessons,
+    saved,
+    projects,
+    applications,
+    xp,
+    research,
+    friends,
+    battles_played: battlesPlayed,
+    battles_won: battlesWon,
+    daily_challenges: dailyChallenges,
+  };
 }
 
 /**

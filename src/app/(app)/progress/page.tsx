@@ -4,6 +4,7 @@ import {
   Award,
   BookOpen,
   Bookmark,
+  CalendarCheck,
   Clock,
   Flame,
   FolderKanban,
@@ -14,8 +15,10 @@ import {
   Lock,
   Microscope,
   Rocket,
+  Swords,
   Target,
   TrendingUp,
+  Users,
   Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -58,6 +61,9 @@ const ACHIEVEMENT_ICONS: Record<string, LucideIcon> = {
   "trending-up": TrendingUp,
   award: Award,
   zap: Zap,
+  users: Users,
+  swords: Swords,
+  "calendar-check": CalendarCheck,
 };
 
 export default async function ProgressPage() {

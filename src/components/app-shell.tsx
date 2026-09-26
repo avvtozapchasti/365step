@@ -12,6 +12,7 @@ import {
   LogOut,
   Map,
   Sparkles,
+  Swords,
   TrendingUp,
 } from "lucide-react";
 import clsx from "clsx";
@@ -28,6 +29,7 @@ const NAV = [
   { href: "/dashboard", label: "Today", short: "Today", icon: Home },
   { href: "/learn", label: "Learn", short: "Learn", icon: Sparkles },
   { href: "/opportunities", label: "Opportunities", short: "Explore", icon: Compass },
+  { href: "/compete", label: "Compete", short: "Compete", icon: Swords },
   { href: "/roadmap", label: "Roadmap", short: "Roadmap", icon: Map },
   { href: "/projects", label: "Projects", short: "Projects", icon: FolderKanban },
   { href: "/progress", label: "Progress", short: "Progress", icon: TrendingUp },
@@ -134,7 +136,7 @@ export function AppShell({ user, children }: { user: ShellUser; children: React.
               href={href}
               aria-label={label}
               className={clsx(
-                "flex min-w-0 flex-1 flex-col items-center gap-1 px-0.5 py-2.5 text-[10px] transition-colors",
+                "flex min-w-0 flex-1 flex-col items-center gap-0.5 px-0.5 py-2 text-[9.5px] transition-colors",
                 isActive(href) ? "font-medium text-[var(--fg)]" : "subtle",
               )}
             >

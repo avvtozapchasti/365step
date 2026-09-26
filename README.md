@@ -19,6 +19,10 @@ credentials, no external services. The demo account is seeded on day 37 of its j
 with a 12-day streak, 14 completed lessons, four saved opportunities and two portfolio
 projects, so the first screen means something.
 
+**Deploying to Vercel with no setup?** It works — see
+[Zero-config deploy](#zero-config-deploy-what-vercel-does-out-of-the-box) in Deployment for
+what that gives you and where it stops.
+
 ---
 
 ## Contents
@@ -161,7 +165,7 @@ internship, competitions, career skills — each a different twelve-month arc.
 
 ### Gamification
 
-XP, 15 levels, daily streaks, 14 achievements. Restrained on purpose: it should feel like
+XP, 15 levels, daily streaks, 18 achievements. Restrained on purpose: it should feel like
 a well-made product, not a children's game.
 
 The award table is deliberately stingy — a lesson is worth more than a tap, shipping a
@@ -169,6 +173,35 @@ project is worth more than saving a bookmark — and the level curve is calibrat
 it, so a full 365 days of consistent use lands near level 15 rather than maxing out in
 month five. Achievements are checked against real counters, so none of them can be
 clicked into existence.
+
+### Compete: friends, battles and the daily SAT challenge
+
+One nav destination, three tabs, so the mobile tab bar doesn't have to grow by three.
+
+**Friends.** Add someone by email, accept or decline requests, remove a friend. Stored as
+one row per pair (`user_a < user_b`, canonically ordered) rather than two directional rows,
+so "are these two friends" is always a single unambiguous query.
+
+**Battles.** Challenge a friend to a head-to-head SAT quiz — five questions, the same set
+for both players, chosen once at creation so neither side gets an easier draw. Whoever
+scores higher wins; a tie is broken by speed. Correct answers are never sent to the client
+before a player submits — the question payload carries only prompt and options, and the
+grading breakdown arrives solely in the response to that one submission — so a battle
+can't be solved by reading the page source.
+
+**Daily SAT Challenge.** One fixed set of five SAT questions everyone sees that calendar
+day, with a leaderboard ranked by score then speed. The set is chosen by a seeded shuffle
+of the date string itself (a small dependency-free PRNG), so it is reproducible without
+being precomputed and identical across SQLite and Postgres without leaning on either
+dialect's own `RANDOM()`.
+
+Both battles and the daily challenge share one quiz component
+([`multi-question-quiz.tsx`](src/components/multi-question-quiz.tsx)): answer every
+question, submit once, see the breakdown. Winning a battle, playing the daily challenge,
+and making a friend all award XP and can unlock achievements — checked for whichever
+player actually crossed the threshold, even when that isn't the one who triggered the
+check (a battle you *lose* can still complete your opponent's fifth win and hand them
+Battle Champion in the same request).
 
 ### Projects and portfolio
 
@@ -256,23 +289,31 @@ src/
 │       ├── dashboard/                Today: goal, arc, steps, assistant, deadlines
 │       ├── learn/                    Catalogue → course → lesson player
 │       ├── opportunities/            Matched feed → detail
+│       ├── compete/                  Daily challenge · battles · friends, tabbed
+│       │   └── battles/[id]/         One battle's accept/play/results flow
 │       ├── roadmap/  projects/  progress/
 │
 ├── actions/                          Server actions (the only write path)
 │   auth · onboarding · steps · lessons · opportunities · projects · roadmap
+│   friends · battles · daily-challenge
 │
 ├── components/                       UI. Client components marked "use client"
 │   ui.tsx  app-shell  today-steps  lesson-player  opportunity-card
-│   roadmap-timeline  project-manager  ai-panel  reward-toast  …
+│   roadmap-timeline  project-manager  ai-panel  reward-toast
+│   compete-tabs  friends-panel  battles-panel  battle-quiz
+│   daily-challenge-panel  multi-question-quiz  …
 │
 └── lib/                              Domain logic. No React, no JSX.
     ├── db/index.ts                   Two-driver data layer
-    ├── auth.ts  password.ts          Sessions and hashing
+    ├── auth.ts  accounts.ts  password.ts   Sessions, registration, hashing
     ├── queries.ts                    All reads, mapped to domain types
     ├── gamification.ts               XP, streaks, achievements — all writes
     ├── steps.ts                      Daily plan generation
     ├── match.ts                      Opportunity scoring and reasons
     ├── roadmap.ts  roadmap-templates.ts
+    ├── friends.ts                    Friend requests, one row per pair
+    ├── battles.ts  battle-topics.ts  Friend battles; topics split out client-safe
+    ├── daily-challenge.ts            The daily SAT challenge and its leaderboard
     ├── ai.ts                         Growth assistant
     ├── taxonomy.ts                   Roles, goals, subjects — the shared vocabulary
     ├── xp.ts  date.ts  portfolio.ts  step-display.ts
@@ -280,7 +321,9 @@ src/
 
 db/
 ├── schema.sql                        One schema, valid in SQLite and Postgres
-├── seed.ts                           Catalogue + the demo account's 37 days
+├── seed.ts                           CLI: catalogue + the demo account's 37 days
+├── seed-runtime.ts                   Runtime fallback: raw-sqlite bootstrap for
+│                                      a serverless cold start (see Deployment)
 └── content/                          The curriculum and the opportunity catalogue
     sat · ielts · research · projects · career · opportunities · achievements
 ```
@@ -299,12 +342,21 @@ Some conventions that hold throughout:
 - **`lib/taxonomy.ts` is the single vocabulary.** Onboarding renders from it, the matcher
   scores against it, and the roadmap generator branches on it — which is what makes "your
   answers change the product" true rather than aspirational.
+- **Account operations have no request-scoped dependency.** `lib/accounts.ts` (validation,
+  registration, credential checks) never imports `next/headers`; `lib/auth.ts` builds
+  sessions and cookies on top of it. Splitting them is what lets a plain script — the
+  verification suite, the seed script — register and authenticate a user without a request
+  to hang the call on.
+- **Achievements are checked for whoever actually earned them, not just the caller.** A
+  battle's win-count achievement can complete on the *loser's* submission, since that is
+  the request that pushes the winner's tally over the threshold — `submitBattleAnswers`
+  checks the winner's achievements too, not only the submitting player's.
 
 ---
 
 ## Database
 
-17 tables. [`db/schema.sql`](db/schema.sql) is the single source of truth and applies to
+22 tables. [`db/schema.sql`](db/schema.sql) is the single source of truth and applies to
 both SQLite and PostgreSQL unchanged.
 
 ```
@@ -320,7 +372,10 @@ users ──┬── sessions
         ├── saved_opportunities ────┐
         ├── applications ───────────┼── opportunities
         ├── user_deadlines ─────────┘
-        └── projects
+        ├── projects
+        ├── friendships              (one row per pair, user_a < user_b canonically)
+        ├── battles ──────────────── battle_results
+        └── daily_challenge_attempts ── daily_challenges
 
 courses ──── lessons ──┬── questions
                        └── resources     (curated external material)
@@ -460,7 +515,23 @@ The result is a feature whose worst case is "slightly less warmly worded" rather
 
 ## Deployment
 
-### Vercel + Supabase
+### Zero-config deploy (what Vercel does out of the box)
+
+Connect the repo to Vercel and deploy with **no environment variables set** and the site
+opens: the landing page, sign-up, onboarding, learning, opportunities, Compete, all of it.
+This is deliberate — see [Serverless SQLite fallback](#serverless-sqlite-fallback) below
+for how — but it comes with a real limitation worth understanding before you rely on it
+for anything beyond a first look:
+
+- Data lives in `/tmp`, which Vercel wipes on every cold start and does **not** share
+  across concurrent function instances. Two people using the site at the same moment can
+  land on different instances with different data. For a single visitor clicking around,
+  this is invisible; for the friends/battles features specifically — which need two
+  different accounts to see the *same* row — it will misbehave under any real concurrency.
+- **Set `DATABASE_URL` before relying on this for a demo with more than one person, or for
+  anything you want to persist.** The steps are below and take about five minutes.
+
+### Vercel + Supabase (real persistence)
 
 1. Create a Supabase project.
 2. Apply the schema: paste [`db/schema.sql`](db/schema.sql) into the Supabase SQL editor
@@ -471,9 +542,10 @@ The result is a feature whose worst case is "slightly less warmly worded" rather
    DATABASE_URL="postgresql://…" npm run db:seed
    ```
 
-4. Deploy to Vercel and set `DATABASE_URL` (plus `ANTHROPIC_API_KEY` if you want the
-   Claude headline). Use the **pooled** connection string on port `6543`; the direct
-   connection exhausts its limit under serverless.
+4. In the Vercel project's environment variables, set `DATABASE_URL` to that same
+   connection string (plus `ANTHROPIC_API_KEY` if you want the Claude headline), then
+   redeploy. Use the **pooled** connection string on port `6543`; the direct connection
+   exhausts its limit under serverless.
 
 The app is Vercel-ready as it stands: every route is `force-dynamic` because every page
 is per-user, and `better-sqlite3` is declared in `serverExternalPackages` so it is never
@@ -485,10 +557,38 @@ bundled.
 > database to untrusted clients (a mobile app using the Supabase client, say), add RLS
 > policies before doing so; the schema is shaped for it, but they are not written.
 
-### Local SQLite in production
+### Serverless SQLite fallback
 
-Workable for a single long-lived instance, but not for serverless: the filesystem is
-ephemeral, so every cold start would lose the data. Use Postgres for anything deployed.
+With no `DATABASE_URL`, the SQLite driver ([`src/lib/db/index.ts`](src/lib/db/index.ts))
+detects a serverless host (`process.env.VERCEL` or `AWS_LAMBDA_FUNCTION_NAME`) and:
+
+1. Points at `/tmp/365step.db` instead of `./data/365step.db` — the only writable path on
+   a Vercel function; writing to `./data` there throws, which was the original cause of
+   "the site won't open" on a bare deploy.
+2. On a brand-new file (every cold start), applies `db/schema.sql` and seeds the full
+   catalogue plus a minimal demo account, using
+   [`db/seed-runtime.ts`](db/seed-runtime.ts) — a small, dependency-light seeder kept
+   deliberately separate from the CLI's own `db/seed.ts`. It talks to the raw
+   better-sqlite3 handle rather than this module's own query helpers, because those route
+   through the very driver promise this code is constructing; calling back into them here
+   would await a promise that can't resolve until the function returns.
+
+This path is **only for serverless** — it never runs for local development. `npm run
+db:seed`'s first call into the database layer would otherwise hit this same "brand-new
+file" branch and pre-create a bare demo account before the CLI script's own richer,
+37-day-history seeding gets a chance to run, which is exactly the kind of double-seeding
+bug this guard exists to prevent.
+
+If something still looks wrong after deploying, the global error boundary
+([`src/app/error.tsx`](src/app/error.tsx)) recognises the "missing table" shape of error
+and prints next steps directly on the page, including the `DATABASE_URL` reminder above.
+
+### Local SQLite in production (self-hosted, not serverless)
+
+If you run `npm start` yourself on a persistent server (not Vercel/Lambda), local SQLite
+at `./data/365step.db` works fine and persists normally — the serverless fallback above
+never triggers because `VERCEL`/`AWS_LAMBDA_FUNCTION_NAME` aren't set. Postgres is still
+recommended for anything with real users.
 
 ---
 
@@ -497,7 +597,7 @@ ephemeral, so every cold start would lose the data. Use Postgres for anything de
 Checked before shipping, not assumed:
 
 - `npm run typecheck` — clean, `strict` mode.
-- `npm run build` — clean, all 14 routes.
+- `npm run build` — clean, all 16 routes.
 - `npm audit` — 0 vulnerabilities.
 - **67 end-to-end logic checks** against the real database, driving the real server
   modules: onboarding a second user with a different profile, roadmap generation from the
@@ -508,13 +608,30 @@ Checked before shipping, not assumed:
   mirroring, live countdown, unsave cleanup), application tracking, the assistant's
   fallback path, snapshot arithmetic, level-curve calibration, and cross-user data
   isolation.
+- **61 further checks for friends, battles and the daily challenge**: rejecting a request
+  to a non-account or to yourself, both directions of a friendship reading back correctly,
+  battles refusing a non-friend or an invalid topic, the opponent-only accept/decline gate,
+  questions withholding the correct answer until submission, the winner determined
+  correctly on score then speed, no re-submission either flow, XP awarded exactly once per
+  action, the daily challenge producing an identical question set for every user that day,
+  the leaderboard ranking correctly, and achievements unlocking for the actual winner even
+  when they are not the one who triggered the completing request.
+- **A full serverless-deploy simulation**: production build, `VERCEL=1`, no
+  `DATABASE_URL`, a completely fresh `/tmp` — landing page, demo login, dashboard and
+  Compete all return 200, confirming the fix for the original "site won't open" failure.
 - **HTTP checks** — every route returns 200 for a signed-in user and 307 to `/signin` for
-  a signed-out one; server actions were invoked over real HTTP and their database side
-  effects confirmed.
+  a signed-out one; server actions (including friend requests, battle creation, accepting,
+  submitting, and the daily challenge) were invoked over real HTTP between two real
+  accounts and their database side effects confirmed.
 
-Two bugs the verification caught and fixed: a double-count in the quiz score display (the
-server's authoritative score is used now), and a single reward toast that conflated an
-action's XP with an achievement's (they get separate cards, each reporting its own).
+Bugs the verification caught and fixed: a double-count in the quiz score display (the
+server's authoritative score is used now); a reward toast that conflated an action's XP
+with an achievement's (separate cards now, each reporting its own); a client component
+that imported a value (not just a type) from a server-only module, pulling `better-sqlite3`
+and `postgres` into the browser bundle and breaking the production build; and the
+serverless auto-seed initially running unconditionally, which caused the local `npm run
+db:seed` CLI to see a pre-existing minimal demo account on its very first run and skip
+building the real 37-day history — now gated to serverless hosts only.
 
 ---
 
@@ -557,6 +674,15 @@ one that says where it stops:
   with subject substitution — predictable and inspectable, but not infinitely bespoke.
 - **No tests in CI.** The verification suite was run against the real database during
   development; it is not wired into a CI pipeline or committed as a test suite.
+- **The zero-config Vercel deploy is single-instance in spirit.** It answers "does the site
+  open with no setup" honestly, but `/tmp` is ephemeral and not shared across concurrent
+  function instances — real use, especially of friends/battles, needs `DATABASE_URL` set.
+  Covered in [Deployment](#deployment).
+- **No battle rematch or expiry sweep.** A pending battle past its `expires_at` is not
+  automatically marked expired anywhere yet — the column exists, nothing reads it.
+- **Friend battles offer four fixed topics** (Reading, Writing, Math, Mixed), not an
+  arbitrary course — battles pull from SAT content specifically, since that is where the
+  question bank is deepest.
 
 ## Future improvements
 
@@ -575,6 +701,13 @@ one that says where it stops:
 7. **Email and push nudges** on the streak and on deadlines inside seven days.
 8. **RLS and a public API**, so a mobile client can talk to Supabase directly.
 9. **Localisation** — Russian and Kazakh first, given the initial audience.
+10. **Battle rematch and a friends leaderboard** — head-to-head history is tracked per
+    battle already; a per-friend win/loss record and a one-tap rematch are a small step
+    from what is there.
+11. **Expire stale battles** — a scheduled sweep (or a check on read) that marks a battle
+    past its `expires_at` as `expired` rather than leaving it pending indefinitely.
+12. **Battle topics beyond SAT** — IELTS and Research have question banks too; opening
+    battles to them is mostly relaxing `BATTLE_TOPICS`' track filter.
 
 ---
 

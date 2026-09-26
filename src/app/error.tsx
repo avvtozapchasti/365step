@@ -48,11 +48,19 @@ export default function GlobalError({
         {looksUnseeded ? (
           <>
             <p className="muted mt-2.5 text-sm leading-relaxed">
-              The database looks empty or missing its tables. Seeding it should fix this:
+              The database looks empty or missing its tables. Locally, seeding it should
+              fix this:
             </p>
             <pre className="sunken mt-3 overflow-x-auto rounded-xl p-3.5 text-xs">
               <code>npm run db:reset</code>
             </pre>
+            <p className="subtle mt-3 text-xs leading-relaxed">
+              Deployed on Vercel? Set <code className="font-mono">DATABASE_URL</code> to a
+              Postgres/Supabase connection string in the project&apos;s environment
+              variables, then redeploy — see the README&apos;s Deployment section. Without
+              it the app falls back to a temporary database that resets on every cold
+              start.
+            </p>
           </>
         ) : (
           <p className="muted mt-2.5 text-sm leading-relaxed">

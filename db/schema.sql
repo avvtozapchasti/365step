@@ -363,3 +363,86 @@ CREATE TABLE IF NOT EXISTS projects (
 );
 
 CREATE INDEX IF NOT EXISTS idx_projects_user ON projects(user_id);
+
+-- ------------------------------------------------------------------ social --
+
+-- One row per unordered pair, stored canonically with user_a < user_b (string
+-- comparison of the UUID) so a lookup never has to check both orderings.
+-- `requested_by` is whichever of the two actually sent the request.
+CREATE TABLE IF NOT EXISTS friendships (
+  id           TEXT PRIMARY KEY,
+  user_a       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_b       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status       TEXT NOT NULL DEFAULT 'pending'
+                 CHECK (status IN ('pending', 'accepted', 'declined')),
+  requested_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at   TEXT NOT NULL,
+  responded_at TEXT,
+  UNIQUE (user_a, user_b)
+);
+
+CREATE INDEX IF NOT EXISTS idx_friendships_a ON friendships(user_a);
+CREATE INDEX IF NOT EXISTS idx_friendships_b ON friendships(user_b);
+
+-- ----------------------------------------------------------------- battles --
+
+-- A head-to-head SAT quiz between two friends. `question_ids` is a fixed JSON
+-- array chosen once at creation so both players answer exactly the same set —
+-- the fairness a battle depends on.
+CREATE TABLE IF NOT EXISTS battles (
+  id            TEXT PRIMARY KEY,
+  challenger_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  opponent_id   TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  topic         TEXT NOT NULL,             -- 'sat-reading' | 'sat-writing' | 'sat-math' | 'sat-mixed'
+  question_ids  TEXT NOT NULL,             -- json array of question ids
+  status        TEXT NOT NULL DEFAULT 'pending'
+                  CHECK (status IN ('pending', 'active', 'completed', 'declined', 'expired')),
+  winner_id     TEXT REFERENCES users(id),  -- null once completed means a draw
+  created_at    TEXT NOT NULL,
+  expires_at    TEXT NOT NULL,
+  completed_at  TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_battles_challenger ON battles(challenger_id);
+CREATE INDEX IF NOT EXISTS idx_battles_opponent ON battles(opponent_id);
+
+CREATE TABLE IF NOT EXISTS battle_results (
+  id           TEXT PRIMARY KEY,
+  battle_id    TEXT NOT NULL REFERENCES battles(id) ON DELETE CASCADE,
+  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  correct      INTEGER NOT NULL DEFAULT 0,
+  total        INTEGER NOT NULL DEFAULT 0,
+  seconds      INTEGER NOT NULL DEFAULT 0,
+  answers      TEXT NOT NULL DEFAULT '[]',  -- json array of chosen option indices
+  submitted_at TEXT NOT NULL,
+  UNIQUE (battle_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_battle_results_battle ON battle_results(battle_id);
+CREATE INDEX IF NOT EXISTS idx_battle_results_user ON battle_results(user_id);
+
+-- ------------------------------------------------------- daily SAT challenge --
+
+-- One row per calendar day: a fixed, identical set of SAT questions everyone
+-- who plays that day answers, so the leaderboard is a fair comparison.
+CREATE TABLE IF NOT EXISTS daily_challenges (
+  id             TEXT PRIMARY KEY,
+  challenge_date TEXT NOT NULL UNIQUE,
+  question_ids   TEXT NOT NULL,   -- json array of question ids
+  created_at     TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS daily_challenge_attempts (
+  id           TEXT PRIMARY KEY,
+  challenge_id TEXT NOT NULL REFERENCES daily_challenges(id) ON DELETE CASCADE,
+  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  correct      INTEGER NOT NULL DEFAULT 0,
+  total        INTEGER NOT NULL DEFAULT 0,
+  seconds      INTEGER NOT NULL DEFAULT 0,
+  xp_awarded   INTEGER NOT NULL DEFAULT 0,
+  completed_at TEXT NOT NULL,
+  UNIQUE (challenge_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_dca_challenge ON daily_challenge_attempts(challenge_id);
+CREATE INDEX IF NOT EXISTS idx_dca_user ON daily_challenge_attempts(user_id);

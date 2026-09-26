@@ -53,12 +53,57 @@ function toPgPlaceholders(sql: string): string {
 async function createSqliteDriver(): Promise<Driver> {
   const { default: Database } = await import("better-sqlite3");
 
-  const file = process.env.SQLITE_PATH ?? path.join(process.cwd(), "data", "365step.db");
+  // Vercel (and most serverless hosts) give a function a read-only filesystem
+  // except for /tmp — writing to ./data there throws, which is the "site won't
+  // open" crash this guards against. /tmp is ephemeral (wiped on cold start,
+  // not shared across concurrent instances), so this is a fallback for opening
+  // the site without any setup, not a substitute for real persistence: set
+  // DATABASE_URL to a Postgres/Supabase connection string for that.
+  const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+  const file =
+    process.env.SQLITE_PATH ??
+    (isServerless ? "/tmp/365step.db" : path.join(process.cwd(), "data", "365step.db"));
   fs.mkdirSync(path.dirname(file), { recursive: true });
 
   const db = new Database(file);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
+
+  // Auto-provision a brand-new file — but ONLY on a serverless host. This is
+  // strictly a "the site should not 500" fallback for Vercel's ephemeral /tmp,
+  // never for local development: `npm run db:seed`/`db:reset` builds a much
+  // richer demo account (37 days of history), and its own applySchema() call
+  // is what first constructs this very driver — auto-seeding here too would
+  // make the CLI script see an "already present" demo account on its very
+  // first run and skip building that history. Locally, an unseeded database
+  // is meant to surface the normal "run npm run db:reset" error instead.
+  //
+  // Talks to the raw better-sqlite3 handle rather than this module's own
+  // all()/run(): those route through the very driver promise this function is
+  // building, so calling them here would await a promise that cannot resolve
+  // until this function returns.
+  if (isServerless) {
+    const hasSchema = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'users'")
+      .get();
+    if (!hasSchema) {
+      try {
+        db.exec(fs.readFileSync(path.join(process.cwd(), "db", "schema.sql"), "utf8"));
+        const { seedRawSqlite } = await import("../../../db/seed-runtime");
+        await seedRawSqlite(db);
+        console.log(
+          "365step: provisioned a temporary SQLite database in /tmp. This resets " +
+            "on the next cold start — set DATABASE_URL to a Postgres/Supabase " +
+            "connection string for real persistence (see README, Deployment).",
+        );
+      } catch (error) {
+        // Surface in the server log. Queries against missing tables will still
+        // fail afterwards with a clear "no such table" the error boundary
+        // recognises, rather than this silently pretending to have succeeded.
+        console.error("365step: automatic database setup failed —", error);
+      }
+    }
+  }
 
   let depth = 0;
 

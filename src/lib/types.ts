@@ -223,6 +223,30 @@ export interface UserDeadline {
   daysLeft: number;
 }
 
+// -------------------------------------------------------------- competitive --
+// Shared by the daily SAT challenge and friend battles: both are "answer N
+// questions, submit once" flows built on the same quiz shape.
+
+/**
+ * A question as shown before it has been answered — no correct index, no
+ * explanation. Withheld until submission so a competitive quiz cannot be
+ * solved by reading the page source or the network payload.
+ */
+export interface PublicQuizQuestion {
+  id: string;
+  prompt: string;
+  options: string[];
+}
+
+/** Per-question grading, returned only in the response to the submission that earned it. */
+export interface QuizBreakdownItem {
+  questionId: string;
+  chosenIndex: number;
+  correctIndex: number;
+  isCorrect: boolean;
+  explanation: string;
+}
+
 /** Everything the dashboard, progress page and AI layer read from. */
 export interface GrowthSnapshot {
   totalXp: number;
