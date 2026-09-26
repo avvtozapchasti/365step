@@ -41,25 +41,31 @@ export { hashPassword, verifyPassword } from "./password";
 // -------------------------------------------------------------- sessions ----
 
 export async function createSession(userId: string): Promise<void> {
-  const id = randomBytes(32).toString("hex");
-  const created = new Date();
-  const expires = new Date(created.getTime() + SESSION_DAYS * 86_400_000);
+  try {
+    const id = randomBytes(32).toString("hex");
+    const created = new Date();
+    const expires = new Date(created.getTime() + SESSION_DAYS * 86_400_000);
 
-  await run("INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)", [
-    id,
-    userId,
-    created.toISOString(),
-    expires.toISOString(),
-  ]);
+    await run("INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)", [
+      id,
+      userId,
+      created.toISOString(),
+      expires.toISOString(),
+    ]);
 
-  const jar = await cookies();
-  jar.set(COOKIE, id, {
-    httpOnly: true,
-    sameSite: "strict",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    expires,
-  });
+    const jar = await cookies();
+    jar.set(COOKIE, id, {
+      httpOnly: true,
+      sameSite: "strict",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      expires,
+    });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error("Create session error:", msg, error);
+    throw new Error(`Failed to create session: ${msg}`);
+  }
 }
 
 export async function destroySession(): Promise<void> {
