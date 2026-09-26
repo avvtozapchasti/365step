@@ -155,6 +155,8 @@ async function createPostgresDriver(url: string): Promise<Driver> {
   const pool = postgres(url, {
     max: 5,
     idle_timeout: 20,
+    // Supabase's transaction pooler (port 6543) cannot hold prepared statements.
+    prepare: false,
     // Supabase requires TLS; a local Postgres over loopback does not have it.
     ssl: local ? false : "require",
   }) as unknown as PgPool;
